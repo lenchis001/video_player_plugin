@@ -91,16 +91,18 @@ static DeviceProfile GetDeviceProfile() {
     "org.w3.clearkey" => Clear Key
     "org.w3.cdrmv1"  => ChinaDRM
 */
-static std::string GetDRMStringInfoByDrmType(dm_type_e dm_type)
+static std::string GetDRMSubTypeStringInfoByDrmType(dm_type_e dm_type)
 {
     switch(dm_type)
     {
         case DM_TYPE_PLAYREADY:
-            return "com.microsoft.playready";
+          return "com.microsoft.playready";
         case DM_TYPE_WIDEVINE:
-            return "com.widevine.alpha";
+          return "com.widevine.alpha";
+        case DM_TYPE_CLEARKEY:
+          return "org.w3.clearkey";
         default:
-            return "com.widevine.alpha";
+          return "";
     }
 }
 
@@ -115,10 +117,6 @@ int VideoPlayer::DM_EME_challenge_Data_CB(void* session_id, int msg_type , void*
     LOG_INFO("EME_challenge_Data_CB");
     VideoPlayer *pThis = static_cast<VideoPlayer*> (user_data);
 
-    //widevine test licence url.
-    //char license_url[128] = "http://widevine-proxy.appspot.com/proxy";
-    //playready test licence url.
-    //char license_url[128] = "http://test.playready.microsoft.com/service/rightsmanager.asmx";
     char license_url[128] = {0};
     strcpy(license_url,pThis->m_LicenseUrl.c_str());
 
@@ -136,7 +134,7 @@ int VideoPlayer::DM_EME_challenge_Data_CB(void* session_id, int msg_type , void*
     license_param.param2 = pbResponse;
     license_param.param3 = (void*)pbResponse_len;
 
-    LOG_INFO("decoded   licen data len [%d], license data %s", pbResponse_len, pbResponse);
+    //LOG_INFO("decoded   licen data len [%d], license data %s", pbResponse_len, pbResponse);
 
 //use dlopen to open libdrmmanager.so.0
   void *libDrmHandle = dlopen("libdrmmanager.so.0", RTLD_LAZY); 
@@ -171,25 +169,33 @@ void VideoPlayer::Drm_Init(player_h m_hPlayer, const std::string &uri, dm_type_e
 {
     int ret = 0;
     int drm_handle = 0;
-    std::string drm_string = GetDRMStringInfoByDrmType(dm_type);
+    std::string drm_subtype_string = GetDRMSubTypeStringInfoByDrmType(dm_type);
 
-    //use dlopen to open libdrmmanager.so.0
-    void *libMplayerHandle = dlopen("libdrmmanager.so.0", RTLD_LAZY); 
-    if (libMplayerHandle)
+    //use dlopen to open libdrmmanager.so.0 -DMGRCreateDRMSession
+    void *libDrmHandle = dlopen("libdrmmanager.so.0", RTLD_LAZY); 
+    void *libMplayerHandle = dlopen("libcapi-media-player.so.0", RTLD_LAZY); 
+    if (libDrmHandle)
     {
-
        DRMSessionHandle_t (*DMGRCreateDRMSession)(dm_type_e type, const char* drm_sub_type) = nullptr;
-      *(void **)(&DMGRCreateDRMSession) =  dlsym(libMplayerHandle, "DMGRCreateDRMSession");
+      *(void **)(&DMGRCreateDRMSession) =  dlsym(libDrmHandle, "DMGRCreateDRMSession");
       if (DMGRCreateDRMSession)
       {
-        m_DRMSession = DMGRCreateDRMSession(DM_TYPE_EME, drm_string.c_str());
+        if (dm_type == DM_TYPE_PLAYREADY || dm_type == DM_TYPE_WIDEVINE || dm_type == PLAYER_DRM_TYPE_CLEARKEY)
+        {
+          m_DRMSession = DMGRCreateDRMSession(DM_TYPE_EME, drm_subtype_string.c_str());
+        }
+        else if (dm_type == DM_TYPE_VERIMATRIX)
+        {
+          m_DRMSession = DMGRCreateDRMSession(DM_TYPE_VERIMATRIX, drm_subtype_string.c_str());
+        }
+
       }
       else {
         LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror());
       }
 
       int (*DMGRSetData)(DRMSessionHandle_t drm_session, const char* data_type, void* input_data) = nullptr;
-      *(void **)(&DMGRSetData) =  dlsym(libMplayerHandle, "DMGRSetData");
+      *(void **)(&DMGRSetData) =  dlsym(libDrmHandle, "DMGRSetData");
       if (DMGRSetData)
       {
         //set url
@@ -204,23 +210,14 @@ void VideoPlayer::Drm_Init(player_h m_hPlayer, const std::string &uri, dm_type_e
             LOG_INFO( "setdata failed for renew callback" );
             return;
         }
-        SetDataParam_t pSetDataParam;
-        pSetDataParam.param1 = (void*)DM_EME_challenge_Data_CB;
-        pSetDataParam.param2 = (void*)this;
-        ret = DMGRSetData(m_DRMSession, "eme_request_key_callback", (void*)&pSetDataParam);
-        if (ret != DM_ERROR_NONE)
-        {
-            LOG_INFO("SetData challenge_data_callback failed\n");
-        }
 
-        ret = DMGRSetData( m_DRMSession, "Initialize", NULL );
       }
       else {
         LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror());
       }
 
       int (*DMGRGetData)(DRMSessionHandle_t drm_session, const char* data_type, void* output_data) = nullptr;
-      *(void **)(&DMGRGetData) =  dlsym(libMplayerHandle, "DMGRSDMGRGetDataetData");
+      *(void **)(&DMGRGetData) =  dlsym(libDrmHandle, "DMGRGetData");
       if (DMGRGetData)
       {
         ret = DMGRGetData( m_DRMSession, "drm_handle", ( void** )&drm_handle );
@@ -236,15 +233,12 @@ void VideoPlayer::Drm_Init(player_h m_hPlayer, const std::string &uri, dm_type_e
       else {
         LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror());
       }
-      //call dlclose
-      dlclose(libMplayerHandle);
     }
     else {
        LOG_ERROR("[VideoPlayer] dlopen failed %s: ", dlerror());
     }
-    //use dlopen to open libcapi-media-player.so.0
-    void *libDrmHandle = dlopen("libcapi-media-player.so.0", RTLD_LAZY); 
-    if (libDrmHandle)
+    //use dlopen to open libcapi-media-player.so.0 
+    if (libMplayerHandle)
     {
       int (*player_set_drm_handle)(player_h player, player_drm_type_e drm_type, int drm_handle) = nullptr;
       *(void **)(&player_set_drm_handle) =  dlsym(libMplayerHandle, "player_set_drm_handle");
@@ -271,30 +265,66 @@ void VideoPlayer::Drm_Init(player_h m_hPlayer, const std::string &uri, dm_type_e
       {
         
         bool (*DMGRSecurityInitCompleteCB)(int* drm_handle, unsigned int len, unsigned char *pssh_data, void* user_data) = nullptr;
-        *(void **)(&DMGRSecurityInitCompleteCB) =  dlsym(libMplayerHandle, "DMGRSecurityInitCompleteCB");
-        if (DMGRSecurityInitCompleteCB)
+        //use dlopen to open libdrmmanager.so.0
+        int ret = 0;
+        if (libDrmHandle)
         {
-          ret = player_set_drm_init_complete_cb( ( player_h )m_hPlayer, (security_init_complete_cb)DMGRSecurityInitCompleteCB, (void*)&m_SetDataParam );
-          if( ret != PLAYER_ERROR_NONE )
+          *(void **)(&DMGRSecurityInitCompleteCB) =  dlsym(libDrmHandle, "DMGRSecurityInitCompleteCB");
+          if (DMGRSecurityInitCompleteCB)
           {
-              LOG_INFO( "player_set_drm_init_complete_cb failed\n" );
-              return;
+            ret = player_set_drm_init_complete_cb( ( player_h )m_hPlayer, (security_init_complete_cb)DMGRSecurityInitCompleteCB, (void*)&m_SetDataParam );
+            if( ret != PLAYER_ERROR_NONE )
+            {
+                LOG_INFO( "player_set_drm_init_complete_cb failed\n" );
+                return;
+            }
+          }
+          else
+          {
+            LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror());
           }
         }
-        else
-        {
-          LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror());
+        else {
+        LOG_ERROR("[VideoPlayer] dlopen failed %s: ", dlerror());
         }
+
       }
       else {
         LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror());
       }
-      //call dlclose
-      dlclose(libDrmHandle);  
     }
     else {
       LOG_ERROR("[VideoPlayer] dlopen failed %s: ", dlerror());
     }
+  //use dlopen to open libdrmmanager.so.0
+  if (libDrmHandle)
+  {
+    int (*DMGRSetData)(DRMSessionHandle_t drm_session, const char* data_type, void* input_data) = nullptr;
+    *(void **)(&DMGRSetData) =  dlsym(libDrmHandle, "DMGRSetData");
+    if (DMGRSetData)
+    {
+        SetDataParam_t pSetDataParam;
+        pSetDataParam.param1 = (void*)DM_EME_challenge_Data_CB;
+        pSetDataParam.param2 = (void*)this;
+        ret = DMGRSetData(m_DRMSession, "eme_request_key_callback", (void*)&pSetDataParam);
+        if (ret != DM_ERROR_NONE)
+        {
+            LOG_INFO("SetData challenge_data_callback failed\n");
+        }
+
+        ret = DMGRSetData( m_DRMSession, "Initialize", NULL );
+    }
+    else {
+      LOG_ERROR("[VideoPlayer] Symbol not found %s: ", dlerror()); 
+    }
+
+  }
+  else {
+    LOG_ERROR("[VideoPlayer] dlopen failed %s: ", dlerror());
+  }
+  //call dlclose
+  dlclose(libDrmHandle);
+  dlclose(libMplayerHandle);
 }
 
 void VideoPlayer::Drm_Release()
@@ -373,10 +403,6 @@ VideoPlayer::VideoPlayer(FlutterDesktopPluginRegistrarRef registrar_ref,
   LOG_INFO("[VideoPlayer] m_DrmType %d", m_DrmType);
   m_LicenseUrl = options.getLicenseServerUrl();
   LOG_INFO("[VideoPlayer] getLicenseServerUrl %s", m_LicenseUrl.c_str());
-  //widevine test url.
-  //std::string uri = "http://109.123.100.140/drm2/h264.mpd";
-  //playready test url.
-  //std::string uri = "https://test.playready.microsoft.com/smoothstreaming/SSWSS720H264PR/SuperSpeedway_720.ism/Manifest";
 
   LOG_INFO("uri: %s", uri.c_str());
   LOG_INFO("[VideoPlayer] register texture");
@@ -440,14 +466,7 @@ VideoPlayer::VideoPlayer(FlutterDesktopPluginRegistrarRef registrar_ref,
   //DRM Function
   if (m_DrmType != 0) //DRM video
   {
-    if (1 == m_DrmType)
-    {
-        Drm_Init(player_, uri, DM_TYPE_PLAYREADY);
-    }
-    else if (2 == m_DrmType)
-    {
-        Drm_Init(player_, uri, DM_TYPE_WIDEVINE);
-    }
+    Drm_Init(player_, uri, (dm_type_e)m_DrmType);
   }
 
   ret = player_set_uri(player_, uri.c_str());
@@ -535,7 +554,10 @@ VideoPlayer::~VideoPlayer() {
   LOG_INFO("[VideoPlayer] destructor");
   dispose();
   //DRM Function
-  Drm_Release();
+  if (m_DrmType != 0) //DRM video
+  {
+    Drm_Release();
+  }
   //
 }
 

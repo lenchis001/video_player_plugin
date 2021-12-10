@@ -48,14 +48,23 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
         {
           message.uri = dataSource.uri;
           message.drmType = 0;
+          //refer the enum of dm_type_e in tizen
           if(dataSource.drmType == DrmType.playready)
           {
             message.drmType = 1;
           }
           else if (dataSource.drmType == DrmType.widevine)
-            {
-              message.drmType = 2;
-            }
+          {
+            message.drmType = 8;
+          }
+          else if (dataSource.drmType == DrmType.Clearkey)
+          {
+            message.drmType = 13;
+          }
+          else if (dataSource.drmType == DrmType.Verimatrix)
+          {
+            message.drmType = 3;
+          }
 
           message.licenseServerUrl = dataSource.licenseServerUrl;
           message.formatHint = _videoFormatStringMap[dataSource.formatHint];

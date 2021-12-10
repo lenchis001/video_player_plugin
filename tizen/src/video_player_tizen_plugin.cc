@@ -92,7 +92,10 @@ TextureMessage VideoPlayerTizenPlugin::create(const CreateMessage &createMsg) {
             createMsg.getFormatHint().c_str());
   LOG_DEBUG("[VideoPlayerTizenPlugin.create] drmType: %d",
               createMsg.getDrmType());
-
+ 
+  //Set DrmType and licence url to options_
+  options_.setDrmOptions(createMsg.getDrmType(), createMsg.getLicenseServerUrl());
+  //end
   std::string uri;
   if (createMsg.getAsset().empty()) {
     uri = createMsg.getUri();

@@ -221,6 +221,12 @@ enum DrmType {
 
   /// The video Drm type is widevine_CDM.
   widevine,
+
+  /// The video Drm type is Clearkey.
+  Clearkey,
+
+  /// The video Drm type is Verimatrix.
+  Verimatrix,
 }
 
 /// The file format of the given video.
