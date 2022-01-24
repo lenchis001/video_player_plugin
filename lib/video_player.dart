@@ -637,21 +637,53 @@ class _VideoAppLifeCycleObserver extends Object with WidgetsBindingObserver {
 /// Widget that displays the video controlled by [controller].
 class VideoPlayer extends StatefulWidget {
   /// Uses the given [controller] for all video rendered in this widget.
-  VideoPlayer(this.controller);
+  VideoPlayer(this.controller, [this.videoAreaScaling = 0]);
 
   /// The [VideoPlayerController] responsible for the video being rendered in
   /// this widget.
   final VideoPlayerController controller;
+
+  /// Render area scaling factor.
+  /// Video render area can be calculated wrong
+  /// in case of using custom screen size for controls.
+  double videoAreaScaling;
 
   @override
   _VideoPlayerState createState() => _VideoPlayerState();
 }
 
 class Geometry {
-  int x = 0;
-  int y = 0;
-  int w = 0;
-  int h = 0;
+  late int x, y, w, h;
+
+  Geometry({int x = 0, int y = 0, int w = 0, int h = 0}){
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other))
+      return true;
+    if (other.runtimeType != runtimeType)
+      return false;
+    return other is Geometry &&
+        x == other.x &&
+        y == other.y &&
+        w == other.w &&
+        h == other.h;
+  }
+
+  Geometry operator *(Object other){
+    return other is double ?
+        Geometry(
+          x: (this.x * other).toInt(),
+          y: (this.y * other).toInt(),
+          w: (this.w * other).toInt(),
+          h: (this.h * other).toInt()) :
+        throw ArgumentError("Only double values are supported by this operator.");
+  }
 }
 
 class _VideoPlayerState extends State<VideoPlayer> {
@@ -701,28 +733,17 @@ class _VideoPlayerState extends State<VideoPlayer> {
   }
 
   bool checkPositionChange() {
-    var devicePixelRatio =
-        MediaQueryData.fromWindow(WidgetsBinding.instance!.window)
-            .devicePixelRatio;
-    final RenderBox? videoRenderBox =
-        videoBoxKey.currentContext!.findRenderObject() as RenderBox;
-    double dx = videoRenderBox?.localToGlobal(Offset.zero).dx ?? 1;
-    double dy = videoRenderBox?.localToGlobal(Offset.zero).dy ?? 1;
-    dx *= devicePixelRatio;
-    dy *= devicePixelRatio;
-    int x = dx.toInt();
-    int y = dy.toInt();
-    final Size size = videoRenderBox?.size ?? Size.zero;
-    int w = (size.width * devicePixelRatio).toInt();
-    int h = (size.height * devicePixelRatio).toInt();
-    return x != _geometry.x ||
-        y != _geometry.y ||
-        w != _geometry.w ||
-        h != _geometry.h;
+    final actualGeometry = _calculateActualGeometry();
+
+    return _geometry != actualGeometry;
   }
 
   void updateGeometry() {
-    var devicePixelRatio =
+    _geometry = _calculateActualGeometry();
+  }
+
+  Geometry _calculateActualGeometry(){
+    final devicePixelRatio =
         MediaQueryData.fromWindow(WidgetsBinding.instance!.window)
             .devicePixelRatio;
     final RenderBox? videoRenderBox =
@@ -734,10 +755,12 @@ class _VideoPlayerState extends State<VideoPlayer> {
     final Size size = videoRenderBox?.size ?? Size.zero;
     double w = size.width * devicePixelRatio;
     double h = size.height * devicePixelRatio;
-    _geometry.x = dx.toInt();
-    _geometry.y = dy.toInt();
-    _geometry.w = w.toInt();
-    _geometry.h = h.toInt();
+
+    return Geometry(
+        x: dx.toInt(),
+        y: dy.toInt(),
+        w: w.toInt(),
+        h: h.toInt()) * widget.videoAreaScaling;
   }
 
   @override
